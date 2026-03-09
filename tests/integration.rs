@@ -224,3 +224,29 @@ async fn test_mixed_production_and_test_usage() {
     // The exact same code would work in production with SystemTimeProvider
     // but would actually wait 8 hours
 }
+
+#[tokio::test]
+async fn test_interval_ticks() {
+    let provider = SafeTimeProvider::new(
+        TimeSource::Test("2024-01-01T00:00:00Z".parse().unwrap())
+    );
+    let control = provider.test_control().unwrap();
+
+    let mut interval = provider.interval(Duration::hours(1));
+
+    // First tick is immediate, returns current time
+    let t0 = interval.tick().await;
+    assert_eq!(t0, "2024-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap());
+    assert_eq!(control.wait_call_count(), 0);
+
+    // Subsequent ticks wait for the period
+    let t1 = interval.tick().await;
+    assert_eq!(t1, "2024-01-01T01:00:00Z".parse::<DateTime<Utc>>().unwrap());
+    assert_eq!(control.wait_call_count(), 1);
+
+    let t2 = interval.tick().await;
+    assert_eq!(t2, "2024-01-01T02:00:00Z".parse::<DateTime<Utc>>().unwrap());
+    assert_eq!(control.wait_call_count(), 2);
+
+    assert_eq!(control.total_waited(), Duration::hours(2));
+}

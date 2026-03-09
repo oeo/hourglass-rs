@@ -6,7 +6,6 @@ enum LoanStatus {
     Active,
     PaymentDue,
     Overdue,
-    Liquidated,
 }
 
 #[derive(Debug)]
@@ -30,16 +29,8 @@ struct LoanLifecycle {
 
 #[derive(Debug)]
 struct Payment {
-    date: DateTime<Utc>,
-    amount: f64,
-    payment_type: PaymentType,
-}
-
-#[derive(Debug)]
-enum PaymentType {
-    Interest,
-    Principal,
-    Fee,
+    _date: DateTime<Utc>,
+    _amount: f64,
 }
 
 impl LoanLifecycle {
@@ -130,9 +121,8 @@ impl LoanLifecycle {
     
     fn make_payment(&mut self, amount: f64, date: DateTime<Utc>) {
         self.payments.push(Payment {
-            date,
-            amount,
-            payment_type: PaymentType::Interest,
+            _date: date,
+            _amount: amount,
         });
         
         self.accrued_interest = (self.accrued_interest - amount).max(0.0);

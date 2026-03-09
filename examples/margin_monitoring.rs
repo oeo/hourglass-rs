@@ -5,7 +5,6 @@ use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 struct CollateralTerms {
-    initial_cvl: f64,      // 140% - Initial collateral value to loan ratio
     margin_call_cvl: f64,  // 125% - Trigger margin call
     liquidation_cvl: f64,  // 105% - Force liquidation
 }
@@ -16,19 +15,17 @@ struct CollateralPosition {
     loan_amount: f64,
     collateral_value: f64,
     terms: CollateralTerms,
-    created_at: DateTime<Utc>,
     margin_call_sent: Option<DateTime<Utc>>,
     liquidated: bool,
 }
 
 impl CollateralPosition {
-    fn new(loan_id: String, loan_amount: f64, collateral_value: f64, terms: CollateralTerms, created_at: DateTime<Utc>) -> Self {
+    fn new(loan_id: String, loan_amount: f64, collateral_value: f64, terms: CollateralTerms) -> Self {
         Self {
             loan_id,
             loan_amount,
             collateral_value,
             terms,
-            created_at,
             margin_call_sent: None,
             liquidated: false,
         }
@@ -129,7 +126,6 @@ async fn main() {
     
     // Create positions with terms from the example
     let terms = CollateralTerms {
-        initial_cvl: 140.0,
         margin_call_cvl: 125.0,
         liquidation_cvl: 105.0,
     };
@@ -140,7 +136,6 @@ async fn main() {
         100_000.0,
         140_000.0,  // 140% CVL
         terms.clone(),
-        time.now(),
     );
     
     // Position 2: Starts healthy at 150% CVL
@@ -149,7 +144,6 @@ async fn main() {
         100_000.0,
         150_000.0,  // 150% CVL
         terms.clone(),
-        time.now(),
     );
     
     monitor.add_position(position1).await;
@@ -220,7 +214,6 @@ mod tests {
         let monitor = MarginMonitor::new(time.clone());
         
         let terms = CollateralTerms {
-            initial_cvl: 140.0,
             margin_call_cvl: 125.0,
             liquidation_cvl: 105.0,
         };
@@ -230,7 +223,6 @@ mod tests {
             100_000.0,
             130_000.0,  // 130% CVL - healthy
             terms,
-            time.now(),
         );
         
         monitor.add_position(position).await;
@@ -250,7 +242,6 @@ mod tests {
         let monitor = MarginMonitor::new(time.clone());
         
         let terms = CollateralTerms {
-            initial_cvl: 140.0,
             margin_call_cvl: 125.0,
             liquidation_cvl: 105.0,
         };
@@ -260,7 +251,6 @@ mod tests {
             100_000.0,
             110_000.0,  // 110% CVL
             terms,
-            time.now(),
         );
         
         monitor.add_position(position).await;

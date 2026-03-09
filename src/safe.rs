@@ -61,17 +61,49 @@ impl SafeTimeProvider {
     
     /// Check if running in test mode
     pub fn is_test_mode(&self) -> bool {
-        self.inner.is_test()
+        self.test_provider.is_some()
     }
     
+    /// Create an interval that ticks at the specified period.
+    /// Each call to `tick()` waits for the period and returns the current time.
+    /// The first tick completes immediately.
+    pub fn interval(&self, period: Duration) -> Interval {
+        Interval {
+            provider: self.clone(),
+            period,
+            first_tick: true,
+        }
+    }
+
     /// Get time control for tests (returns None in production)
-    /// 
+    ///
     /// This method returns a TimeControl guard that allows time manipulation
     /// only when using a test time provider.
     pub fn test_control(&self) -> Option<TimeControl> {
         self.test_provider
             .as_ref()
             .map(|provider| TimeControl::new(provider.clone()))
+    }
+}
+
+/// A repeating interval that yields the current time on each tick.
+/// Created by [`SafeTimeProvider::interval`].
+pub struct Interval {
+    provider: SafeTimeProvider,
+    period: Duration,
+    first_tick: bool,
+}
+
+impl Interval {
+    /// Wait for the next tick and return the current time.
+    /// The first tick completes immediately.
+    pub async fn tick(&mut self) -> DateTime<Utc> {
+        if self.first_tick {
+            self.first_tick = false;
+        } else {
+            self.provider.wait(self.period).await;
+        }
+        self.provider.now()
     }
 }
 

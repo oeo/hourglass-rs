@@ -133,7 +133,7 @@ async fn test_env_source_system() {
     unsafe {
         std::env::set_var("TIME_SOURCE", "system");
     }
-    let source = TimeSource::from_env();
+    let source = TimeSource::from_env().unwrap();
     let provider = SafeTimeProvider::new(source);
     
     assert!(!provider.is_test_mode());
@@ -153,7 +153,7 @@ async fn test_env_source_test_with_start() {
         std::env::set_var("TIME_START", "2024-07-04T00:00:00Z");
     }
     
-    let source = TimeSource::from_env();
+    let source = TimeSource::from_env().unwrap();
     let provider = SafeTimeProvider::new(source);
     
     assert!(provider.is_test_mode());
@@ -175,7 +175,7 @@ async fn test_env_source_test_without_start() {
     }
     
     let before = chrono::Utc::now();
-    let source = TimeSource::from_env();
+    let source = TimeSource::from_env().unwrap();
     let provider = SafeTimeProvider::new(source);
     let after = chrono::Utc::now();
     

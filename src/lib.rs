@@ -63,10 +63,10 @@ pub mod system;
 pub mod test;
 
 // Re-export main types for convenience
-pub use config::TimeSource;
+pub use config::{TimeSource, TimeSourceError};
 pub use control::TimeControl;
 pub use provider::{SharedTimeProvider, TimeProvider};
-pub use safe::SafeTimeProvider;
+pub use safe::{Interval, SafeTimeProvider};
 pub use system::SystemTimeProvider;
 pub use test::TestTimeProvider;
 

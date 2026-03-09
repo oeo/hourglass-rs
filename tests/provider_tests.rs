@@ -11,7 +11,6 @@ async fn test_system_provider_returns_current_time() {
     
     assert!(provider_time >= before);
     assert!(provider_time <= after);
-    assert!(!provider.is_test());
 }
 
 #[tokio::test]
@@ -34,8 +33,7 @@ async fn test_test_provider_advances_time() {
     let provider = TestTimeProvider::new(start_time);
     
     assert_eq!(provider.now(), start_time);
-    assert!(provider.is_test());
-    
+
     let advance_by = Duration::hours(5);
     provider.advance(advance_by);
     

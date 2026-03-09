@@ -2,12 +2,33 @@ use crate::provider::SharedTimeProvider;
 use crate::system::SystemTimeProvider;
 use crate::test::TestTimeProvider;
 use chrono::{DateTime, Utc};
+use std::fmt;
 use std::sync::Arc;
 
+/// Errors that can occur when creating a TimeSource from environment variables
+#[derive(Debug)]
+pub enum TimeSourceError {
+    /// The TIME_START environment variable had an invalid RFC3339 format
+    InvalidTimeStart(String),
+}
+
+impl fmt::Display for TimeSourceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TimeSourceError::InvalidTimeStart(value) => {
+                write!(f, "invalid TIME_START format (expected RFC3339): {}", value)
+            }
+        }
+    }
+}
+
+impl std::error::Error for TimeSourceError {}
+
 /// Time source configuration for different environments
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum TimeSource {
     /// Use system time (production)
+    #[default]
     System,
     /// Use test time with initial timestamp
     Test(DateTime<Utc>),
@@ -19,24 +40,22 @@ impl TimeSource {
     /// Create from environment variables
     /// - TIME_SOURCE: "system" (default) or "test"
     /// - TIME_START: RFC3339 timestamp for test mode start time
-    pub fn from_env() -> Self {
+    pub fn from_env() -> Result<Self, TimeSourceError> {
         match std::env::var("TIME_SOURCE").as_deref() {
             Ok("test") => {
                 if let Ok(start_str) = std::env::var("TIME_START") {
-                    if let Ok(start_time) = DateTime::parse_from_rfc3339(&start_str) {
-                        TimeSource::Test(start_time.with_timezone(&Utc))
-                    } else {
-                        eprintln!("Invalid TIME_START format, using current time");
-                        TimeSource::TestNow
+                    match DateTime::parse_from_rfc3339(&start_str) {
+                        Ok(start_time) => Ok(TimeSource::Test(start_time.with_timezone(&Utc))),
+                        Err(_) => Err(TimeSourceError::InvalidTimeStart(start_str)),
                     }
                 } else {
-                    TimeSource::TestNow
+                    Ok(TimeSource::TestNow)
                 }
             }
-            _ => TimeSource::System,
+            _ => Ok(TimeSource::System),
         }
     }
-    
+
     /// Convert to a time provider instance
     pub fn into_provider(self) -> SharedTimeProvider {
         match self {
@@ -44,11 +63,5 @@ impl TimeSource {
             TimeSource::Test(start) => Arc::new(TestTimeProvider::new(start)),
             TimeSource::TestNow => Arc::new(TestTimeProvider::new_at_now()),
         }
-    }
-}
-
-impl Default for TimeSource {
-    fn default() -> Self {
-        TimeSource::System
     }
 }
