@@ -1,9 +1,5 @@
-use crate::provider::SharedTimeProvider;
-use crate::system::SystemTimeProvider;
-use crate::test::TestTimeProvider;
 use chrono::{DateTime, Utc};
 use std::fmt;
-use std::sync::Arc;
 
 /// Errors that can occur when creating a TimeSource from environment variables
 #[derive(Debug)]
@@ -53,15 +49,6 @@ impl TimeSource {
                 }
             }
             _ => Ok(TimeSource::System),
-        }
-    }
-
-    /// Convert to a time provider instance
-    pub fn into_provider(self) -> SharedTimeProvider {
-        match self {
-            TimeSource::System => Arc::new(SystemTimeProvider),
-            TimeSource::Test(start) => Arc::new(TestTimeProvider::new(start)),
-            TimeSource::TestNow => Arc::new(TestTimeProvider::new_at_now()),
         }
     }
 }

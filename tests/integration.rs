@@ -1,4 +1,4 @@
-use hourglass_rs::{SafeTimeProvider, TimeSource};
+use hourglass_rs::{SafeTimeProvider, TestTimeProvider, TimeSource};
 use chrono::{Duration, DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -64,7 +64,7 @@ async fn test_service_with_real_time() {
     let count = service.get_execution_count().await;
     
     // Should have executed approximately 5 times (50ms / 10ms)
-    assert!(count >= 4 && count <= 6); // Allow some margin for timing
+    assert!((4..=6).contains(&count)); // Allow some margin for timing
 }
 
 #[tokio::test]
@@ -249,4 +249,35 @@ async fn test_interval_ticks() {
     assert_eq!(control.wait_call_count(), 2);
 
     assert_eq!(control.total_waited(), Duration::hours(2));
+}
+
+#[tokio::test]
+async fn test_wait_completed_synchronization() {
+    let provider = Arc::new(TestTimeProvider::new(
+        "2024-01-01T00:00:00Z".parse().unwrap(),
+    ));
+    let time = SafeTimeProvider::new_from_test_provider(provider.clone());
+
+    let result = Arc::new(Mutex::new(None));
+
+    // spawn a task that waits, then writes a result
+    let time_clone = time.clone();
+    let result_clone = result.clone();
+    tokio::spawn(async move {
+        time_clone.wait(Duration::hours(5)).await;
+        *result_clone.lock().await = Some(time_clone.now());
+    });
+
+    // wait_completed resolves after the spawned task's wait() finishes
+    provider.wait_completed().await;
+
+    // the spawned task has completed its wait and written the result
+    let value = result.lock().await;
+    assert!(value.is_some());
+    assert_eq!(
+        value.unwrap(),
+        "2024-01-01T05:00:00Z".parse::<DateTime<Utc>>().unwrap()
+    );
+    assert_eq!(provider.wait_call_count(), 1);
+    assert_eq!(provider.total_waited(), Duration::hours(5));
 }

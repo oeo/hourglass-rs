@@ -1,198 +1,167 @@
-# hourglass-rs 
+# hourglass
 
-A time abstraction crate for Rust that allows you to test time-dependent code by manipulating time in tests while maintaining zero overhead in production.
-
-## Features
-
-- **Zero overhead** in production - thin wrapper around system time
-- **Time manipulation** in tests - advance time, set specific times, track wait calls
-- **Async support** - works with tokio's async runtime  
-- **Type safety** - can't accidentally manipulate time in production
-- **Test isolation** - each test gets its own time control
+A time abstraction for Rust that lets you test time-dependent code by swapping real time for controllable time. Production code uses system time with zero overhead. Test code manipulates time instantly.
 
 ## Quick Start
 
-Add to your `Cargo.toml`:
 ```toml
 [dependencies]
-hourglass_rs = "0.1.1"
+hourglass-rs = "0.2.0"
 ```
-
-## Usage
-
-### Production Code
-
-Write your time-dependent code using `SafeTimeProvider`:
 
 ```rust
 use hourglass_rs::{SafeTimeProvider, TimeSource};
 use chrono::Duration;
 
-async fn daily_task(time_provider: &SafeTimeProvider) {
-    loop {
-        println!("Task executed at: {}", time_provider.now());
-        
-        // Wait for 24 hours
-        time_provider.wait(Duration::days(1)).await;
-    }
+// production: real system time
+let time = SafeTimeProvider::new(TimeSource::System);
+println!("now: {}", time.now());
+time.wait(Duration::seconds(5)).await; // actually waits
+
+// test: controllable time
+let time = SafeTimeProvider::new(
+    TimeSource::Test("2024-01-01T00:00:00Z".parse().unwrap())
+);
+let control = time.test_control().unwrap();
+
+time.wait(Duration::days(30)).await; // returns instantly
+assert_eq!(control.wait_call_count(), 1);
+assert_eq!(control.total_waited(), Duration::days(30));
+```
+
+## Why This Exists
+
+`tokio::time::pause` works if you only need `Instant`/`Duration`. This crate is for when you need:
+
+- `DateTime<Utc>` (chrono) instead of just `Instant`
+- Wait call tracking and statistics
+- Isolated time per test (not global to the runtime)
+- `interval()` that works through the same abstraction
+
+## API
+
+### SafeTimeProvider
+
+The main interface. Pass it to your structs/functions via dependency injection.
+
+```rust
+let time = SafeTimeProvider::new(TimeSource::System); // or Test/TestNow
+
+time.now()                          // -> DateTime<Utc>
+time.wait(duration).await           // sleep for duration
+time.wait_until(deadline).await     // sleep until deadline
+time.interval(period)               // -> Interval with tick()
+time.is_test_mode()                 // -> bool
+time.test_control()                 // -> Option<TimeControl>
+time.clone()                        // clones share the same time
+```
+
+### TimeControl
+
+Returned by `test_control()` in test mode. Manipulates time and reads statistics.
+
+```rust
+let control = time.test_control().unwrap();
+
+control.advance(Duration::hours(6));    // move time forward
+control.set(some_datetime);             // jump to specific time
+control.total_waited()                  // -> Duration
+control.wait_call_count()               // -> usize
+control.reset_wait_tracking();          // reset counters
+```
+
+### Interval
+
+Created by `time.interval(period)`. First tick is immediate, subsequent ticks wait.
+
+```rust
+let mut interval = time.interval(Duration::hours(1));
+let t0 = interval.tick().await; // immediate
+let t1 = interval.tick().await; // waits 1 hour
+```
+
+### TestTimeProvider
+
+Lower-level access. Use `SafeTimeProvider` unless you need `wait_completed()`.
+
+```rust
+use hourglass_rs::TestTimeProvider;
+use std::sync::Arc;
+
+let provider = Arc::new(TestTimeProvider::new(start_time));
+let time = SafeTimeProvider::new_from_test_provider(provider.clone());
+
+// in another task: time.wait(...).await
+// synchronize without sleep(millis) hacks:
+provider.wait_completed().await;
+```
+
+### TimeSource
+
+```rust
+TimeSource::System                  // real time (production)
+TimeSource::Test(datetime)          // fixed start time
+TimeSource::TestNow                 // test mode starting at current time
+TimeSource::from_env()?             // from TIME_SOURCE / TIME_START env vars
+```
+
+`from_env()` reads:
+- `TIME_SOURCE=system` (default) or `TIME_SOURCE=test`
+- `TIME_START=2024-01-01T00:00:00Z` (RFC3339, optional)
+
+Returns `Result<TimeSource, TimeSourceError>`.
+
+## Testing Pattern
+
+Write your business logic against `SafeTimeProvider`:
+
+```rust
+struct MyService {
+    time: SafeTimeProvider,
 }
 
-#[tokio::main]
-async fn main() {
-    // In production, use system time
-    let time = SafeTimeProvider::new(TimeSource::System);
-    daily_task(&time).await;
+impl MyService {
+    async fn run_hourly(&self) {
+        let mut interval = self.time.interval(Duration::hours(1));
+        loop {
+            interval.tick().await;
+            self.do_work().await;
+        }
+    }
 }
 ```
 
-### Testing
-
-Test time-dependent code by controlling time:
+Test it with instant time:
 
 ```rust
 #[tokio::test]
-async fn test_daily_task() {
-    // Create a test time provider starting at a specific time
+async fn test_hourly_service() {
     let time = SafeTimeProvider::new(
         TimeSource::Test("2024-01-01T00:00:00Z".parse().unwrap())
     );
-    
-    // Get time control for the test
-    let control = time.test_control().expect("Should be in test mode");
-    
-    // Start the task
-    let task_handle = tokio::spawn(daily_task(time.clone()));
-    
-    // Advance time by 3 days instantly
-    control.advance(Duration::days(3));
-    
-    // Verify the task executed 3 times
-    assert_eq!(control.wait_call_count(), 3);
-    assert_eq!(control.total_waited(), Duration::days(3));
+    let control = time.test_control().unwrap();
+    let service = MyService { time };
+
+    tokio::spawn(async move { service.run_hourly().await });
+    tokio::task::yield_now().await;
+
+    assert_eq!(control.total_waited(), Duration::hours(5));
 }
 ```
 
 ## Examples
 
-### Interest Calculation
-
-Calculate compound interest with testable time:
-
-```rust
-use hourglass_rs::{SafeTimeProvider, TimeSource};
-use chrono::{DateTime, Duration, Utc};
-
-struct InterestCalculator {
-    time_provider: SafeTimeProvider,
-}
-
-impl InterestCalculator {
-    fn calculate_interest(
-        &self,
-        principal: f64,
-        rate: f64,
-        last_accrual: DateTime<Utc>,
-    ) -> f64 {
-        let now = self.time_provider.now();
-        let days = (now - last_accrual).num_days() as f64;
-        principal * rate * days / 365.0
-    }
-}
-```
-
-### Scheduled Jobs
-
-Run scheduled jobs:
-
-```rust
-async fn run_hourly_job(time: &SafeTimeProvider) {
-    loop {
-        process_job().await;
-        time.wait(Duration::hours(1)).await;
-    }
-}
-
-#[test]
-async fn test_hourly_job() {
-    let time = SafeTimeProvider::new(TimeSource::TestNow);
-    let control = time.test_control().unwrap();
-    
-    // Simulate 24 hours instantly
-    for _ in 0..24 {
-        control.advance(Duration::hours(1));
-    }
-}
-```
-
-### Running Examples
-
-The crate includes several example applications demonstrating different use cases:
-
 ```bash
-# Basic time manipulation
-cargo run --example basic_usage
-
-# Async operations with time control
-cargo run --example async_wait
-
-# Interest calculation simulation
-cargo run --example interest_calc
-
-# Loan accrual simulation (daily interest, monthly cycles)
-cargo run --example loan_accrual
-
-# Collateral margin monitoring (CVL ratios, liquidation)
-cargo run --example margin_monitoring
-
-# Loan lifecycle edge cases (month-end handling, overdue detection)
-cargo run --example loan_lifecycle
+cargo run --example basic               # production vs test, interval
+cargo run --example time_travel         # all manipulation features
+cargo run --example scheduled_service   # realistic service with wait_completed()
 ```
 
-All examples use test mode by default to demonstrate time manipulation. To run in production mode, set:
-```bash
-TIME_SOURCE=system cargo run --example basic_usage
-```
+## Dependencies
 
-## Time Sources
-
-- `TimeSource::System` - Uses actual system time (production)
-- `TimeSource::Test(start_time)` - Test mode starting at specific time
-- `TimeSource::TestNow` - Test mode starting at current system time
-
-### Environment Variables
-
-Configure time source via environment:
-- `TIME_SOURCE=system` (default) or `TIME_SOURCE=test`  
-- `TIME_START=2024-01-01T00:00:00Z` (RFC3339 format for test mode)
-
-## API Reference
-
-### SafeTimeProvider
-
-The main interface for time operations:
-
-- `now()` - Get current time
-- `wait(duration)` - Async wait for duration
-- `wait_until(deadline)` - Async wait until specific time
-- `is_test_mode()` - Check if running in test mode
-- `test_control()` - Get time control (test mode only)
-
-### TimeControl
-
-Test-only time manipulation (via `test_control()`):
-
-- `advance(duration)` - Advance time forward
-- `set(time)` - Set time to specific value
-- `total_waited()` - Get total duration waited
-- `wait_call_count()` - Get number of wait calls
-- `reset_wait_tracking()` - Reset wait statistics
-
-## Usage Notes
-
-1. **Dependency Injection** - Pass `SafeTimeProvider` to your structs/functions
-2. **Avoid Direct Time Access** - Use the provider instead of `Utc::now()`
-3. **Test Time Boundaries** - Test edge cases like midnight, month boundaries
-4. **Isolated Tests** - Each test should have its own time provider
+- `chrono` - DateTime types
+- `tokio` - async runtime (time, rt, macros, sync features)
+- `parking_lot` - fast RwLock for test state
 
 ## Contributing
 

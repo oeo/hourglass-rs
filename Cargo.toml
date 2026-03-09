@@ -1,6 +1,6 @@
 [package]
 name = "hourglass-rs"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 authors = ["taky <taky@taky.com>"]
 description = "A time abstraction crate for testing time-dependent code"
