@@ -6,7 +6,7 @@ A time abstraction for Rust that lets you test time-dependent code by swapping r
 
 ```toml
 [dependencies]
-hourglass-rs = "0.2.0"
+hourglass-rs = "0.2.1"
 ```
 
 ```rust
